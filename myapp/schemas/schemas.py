@@ -27,3 +27,5 @@ class SUserForORM(SUserSend):
     id: int = Field(..., title="ID of the user", description="ID of the user")
 
 
+class SUserForDel(BaseModel):
+    user_id: int = Field(..., gt=0)

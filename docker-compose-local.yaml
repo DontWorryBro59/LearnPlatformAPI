@@ -1,0 +1,16 @@
+services:
+  db:
+    container_name: "db"
+    image: postgres:latest
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: psql_for_app
+    ports:
+      - "5432:5432"
+    networks:
+      - custom
+networks:
+  custom:
+    driver: bridge

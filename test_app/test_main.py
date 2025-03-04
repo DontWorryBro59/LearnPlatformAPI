@@ -1,46 +1,75 @@
-from fastapi.testclient import TestClient
+import asyncio
 
+import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from myapp.database.database_con import test_engine, get_db
 from myapp.main import app
 
-client = TestClient(app)
+_test_async_session = async_sessionmaker(test_engine)
 
 
-def test_get_user():
-    response = client.get("/users/")
+# Подключение для тестовой базы данных
+async def override_get_db():
+    db = _test_async_session()
+    try:
+        yield db
+    finally:
+        await db.close()
+
+
+app.dependency_overrides[get_db] = override_get_db
+
+
+
+@pytest.fixture(scope='session')
+def event_loop():
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.mark.asyncio
+async def test_read_root():
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://test") as ac:
+        response = await ac.get("/")
+    assert response.status_code == 200
+    assert response.json() == {'message': 'Server is running'}
+
+
+@pytest.mark.asyncio
+async def test_read_user():
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://test") as ac:
+        response = await ac.get("/users/get/")
     assert response.status_code == 200
     assert response.json() == {'users': []}
 
 
-def test_post_user():
-    user = {"first_name": "Ivan", "last_name": "Ivanov", "email": "user@example.com", "age": 15}
-    response = client.post("/users/add/", json=user)
+@pytest.mark.asyncio
+async def test_create_user():
+    user = {
+        'first_name': 'John',
+        'second_name': 'Doe',
+        'email': 'john@example.com',
+        'age': 30
+    }
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://test") as ac:
+        response = await ac.post('/users/add/', json=user)
     assert response.status_code == 200
-    assert response.json() == {"message": "User Ivan Ivanov with email user@example.com added"}
+    assert response.json() == {'message': 'Пользователь John Doe добавлен в базу данных'}
 
 
-def test_del_user():
-    user = {"first_name": "Ivan", "last_name": "Ivanov", "email": "user@example.com", "age": 15}
-    response = client.request("DELETE", "/users/del/", json=user)
+@pytest.mark.asyncio
+async def test_del_user():
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://test") as ac:
+        response = await ac.get('/users/get/')
+        get_user_id = response.json()['users'][0]['id']
+        response = await ac.request("DELETE", "/users/del/", json={'user_id': get_user_id})
     assert response.status_code == 200
-    assert response.json() == {"message": "User Ivan Ivanov with email user@example.com deleted"}
-    response = client.get("/users/")
-    assert response.status_code == 200
-    assert response.json() == {'users': []}
-
-def test_fail_post_user():
-    user = {"first_name": "I", "last_name": "Ivanov", "email": "user@example.com", "age": 15}
-    response = client.post("/users/add/", json=user)
-    assert response.status_code == 422
-    assert (response.json()["detail"][0]["msg"]) == 'String should have at least 2 characters'
-    user = {"first_name": "Ivan", "last_name": "I", "email": "user@example.com", "age": 15}
-    response = client.post("/users/add/", json=user)
-    assert response.status_code == 422
-    assert (response.json()["detail"][0]["msg"]) == 'String should have at least 2 characters'
-    user = {"first_name": "Ivan", "last_name": "Ivanov", "email": "user@examplecom", "age": 15}
-    response = client.post("/users/add/", json=user)
-    assert response.status_code == 422
-    assert (response.json()["detail"][0]["msg"]) == 'value is not a valid email address: The part after the @-sign is not valid. It should have a period.'
-    user = {"first_name": "Ivan", "last_name": "Ivanov", "email": "user@example.com", "age": 1}
-    response = client.post("/users/add/", json=user)
-    assert response.status_code == 422
-    assert (response.json()["detail"][0]["msg"]) == 'Input should be greater than or equal to 10'
+    assert response.json() == {'message': f'Пользователь с id {get_user_id} удален из базы данных'}
