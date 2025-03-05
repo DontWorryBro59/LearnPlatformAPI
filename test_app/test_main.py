@@ -5,7 +5,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from myapp.database.database_con import test_engine, get_db
+from myapp.database.database_con import test_engine, get_db, _drop_all_table, create_db
 from myapp.main import app
 
 _test_async_session = async_sessionmaker(test_engine)
@@ -21,7 +21,6 @@ async def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
-
 
 
 @pytest.fixture(scope='session')
@@ -65,6 +64,17 @@ async def test_create_user():
 
 
 @pytest.mark.asyncio
+async def test_get_user_by_id():
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://test") as ac:
+        response = await ac.get('/users/get/')
+        get_user_id = response.json()['users'][0]['id']
+        response = await ac.request("GET", f"/users/get_by_id/?user_id={get_user_id}")
+        assert response.status_code == 200
+        assert response.json()['user']['first_name'] == 'John'
+
+
+@pytest.mark.asyncio
 async def test_del_user():
     async with AsyncClient(transport=ASGITransport(app=app),
                            base_url="http://test") as ac:
@@ -73,3 +83,12 @@ async def test_del_user():
         response = await ac.request("DELETE", "/users/del/", json={'user_id': get_user_id})
     assert response.status_code == 200
     assert response.json() == {'message': f'Пользователь с id {get_user_id} удален из базы данных'}
+
+
+@pytest.mark.asyncio
+async def test_get_del_user_by_id():
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://test") as ac:
+        response = await ac.request("GET", "/users/get_by_id/?user_id=1")
+        assert response.status_code == 404
+        assert response.json() == {'detail': 'Пользователь с id 1 не найден'}
